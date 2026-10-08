@@ -18,10 +18,5 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia(REDUCED_MOTION_QUERY).matches;
 }
 
-/** Puntero fino (mouse/trackpad) — habilita el cursor personalizado. */
-export function prefersFinePointer(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.matchMedia("(pointer: fine)").matches;
-}
-
 export { REDUCED_MOTION_QUERY };
+

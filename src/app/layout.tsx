@@ -35,7 +35,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="es" className={`${fredoka.variable} ${nunito.variable}`}>
+    <html lang="es" suppressHydrationWarning className={`${fredoka.variable} ${nunito.variable}`}>
       <body className="font-body text-ink antialiased">{children}</body>
     </html>
   );

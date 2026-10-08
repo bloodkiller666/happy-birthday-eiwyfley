@@ -34,6 +34,7 @@ export function Celebration() {
 
   const candlesLit = useAdventureStore((state) => state.candlesLit);
   const lightCandles = useAdventureStore((state) => state.lightCandles);
+  const revealCelebration = useAdventureStore((state) => state.revealCelebration);
   const replayFinal = useAdventureStore((state) => state.replayFinal);
   const replayAdventure = useAdventureStore((state) => state.replayAdventure);
   const gemCount = useAdventureStore(selectGemCount);
@@ -111,6 +112,9 @@ export function Celebration() {
       const soft = prefersReducedMotion();
       setStatus(birthday.celebration.litLabel);
       play("win");
+      // El mensaje final se está revelando: la barra de progreso llega al 100%
+      // sólo al terminar el final (no antes, p. ej. al abrir el último cofre).
+      revealCelebration();
       celebrateBurst(soft);
       if (!soft) {
         sideCannons();
@@ -153,7 +157,7 @@ export function Celebration() {
         splits.forEach((split) => split.revert());
       };
     },
-    { dependencies: [candlesLit], scope: rootRef },
+    { dependencies: [candlesLit, revealCelebration], scope: rootRef },
   );
 
 /**
@@ -196,7 +200,7 @@ export function Celebration() {
       id="celebration"
       data-chapter="celebration"
       aria-label={`${birthday.celebration.eyebrow}: ${birthday.celebration.title}`}
-      className="relative min-h-dvh w-full overflow-hidden bg-gradient-to-b from-dusk-top via-ember/50 to-cream"
+      className="relative min-h-dvh w-full overflow-hidden bg-gradient-to-b from-cave-top via-dusk-bottom/80 via-30% via-ember/50 to-cream"
     >
       <div ref={rootRef} className="relative flex flex-col items-center gap-8 px-4 py-24 sm:py-28">
         {/* encabezado */}
@@ -237,16 +241,22 @@ export function Celebration() {
             onKeyUp={(event) => {
               if (event.key === " " || event.key === "Enter") endHold();
             }}
-            disabled={candlesLit}
+            disabled={candlesLit || gemCount < TOTAL_GEMS}
             aria-describedby="candle-status"
             className={cn(
               "sticker touch-none rounded-full px-7 py-4 font-display text-base font-semibold text-ink transition-transform duration-200",
               candlesLit
                 ? "bg-lime"
-                : "bg-gradient-to-r from-cyan to-ember hover:-translate-y-1 active:translate-y-0",
+                : gemCount < TOTAL_GEMS
+                  ? "bg-ink/20 cursor-not-allowed"
+                  : "bg-gradient-to-r from-cyan to-ember hover:-translate-y-1 active:translate-y-0",
             )}
           >
-            {candlesLit ? birthday.celebration.litLabel : birthday.buttons.reveal}
+            {candlesLit
+              ? birthday.celebration.litLabel
+              : gemCount < TOTAL_GEMS
+                ? `${birthday.map.gemsLabel} ${gemCount}/${TOTAL_GEMS} — Necesitás las 4 gemas`
+                : birthday.buttons.reveal}
           </button>
 
           <div className="flex w-full items-center gap-3">
@@ -296,7 +306,7 @@ export function Celebration() {
             onClick={() => {
               play("click");
               replayAdventure();
-              scrollToTarget(0, { duration: 1.6 });
+              scrollToTarget(0, { immediate: true });
             }}
             className="sticker rounded-full bg-eiwy px-6 py-3 font-display font-semibold text-ink transition-transform duration-200 hover:-translate-y-1"
           >

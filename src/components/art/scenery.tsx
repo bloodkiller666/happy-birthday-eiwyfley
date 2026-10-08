@@ -242,44 +242,65 @@ interface FlowerProps extends ArtProps {
 
 export function FlowerArt({ className, open = false, color = "#fdf0e8" }: FlowerProps) {
   return (
-    <svg viewBox="0 0 120 150" className={cn("h-auto w-24", className)} aria-hidden="true">
+    <svg viewBox="0 0 120 155" className={cn("h-auto w-24", className)} aria-hidden="true">
+      {/* Tallo que llega hasta la base de la flor */}
       <path
-        d="M60 150 C 58 120 62 110 60 92"
+        d="M60 152 C 58 122 62 102 60 78"
         stroke="#57a52a"
         strokeWidth="6"
         fill="none"
         strokeLinecap="round"
       />
-      <path d="M60 124 C 40 118 32 104 30 92 C 46 92 58 104 60 124 Z" fill="#7cc43a" />
-      <path d="M60 132 C 80 126 88 112 90 100 C 74 100 62 112 60 132 Z" fill="#7cc43a" />
+      {/* Hojas laterales */}
+      <path d="M60 126 C 38 120 30 106 28 94 C 44 94 58 106 60 126 Z" fill="#7cc43a" stroke="#ffffff" strokeWidth="2" />
+      <path d="M60 134 C 82 128 90 114 92 102 C 76 102 62 114 60 134 Z" fill="#7cc43a" stroke="#ffffff" strokeWidth="2" />
 
-      <g className="flower-petals" transform={`translate(60 ${open ? 78 : 62})`}>
-        {[0, 51, 102, 153, 204, 255, 306].slice(0, 6).map((angle) => (
-          <ellipse
-            key={angle}
-            className="flower-petal"
-            cx="0"
-            cy={open ? -20 : -6}
-            rx={open ? 11 : 8}
-            ry={open ? 20 : 13}
-            fill={color}
+      {/* Sépalos / Cáliz verde en la base de la flor */}
+      <path
+        className="flower-calyx"
+        d="M46 80 C 53 88 67 88 74 80 C 66 74 54 74 46 80 Z"
+        fill="#57a52a"
+        stroke="#ffffff"
+        strokeWidth="2.5"
+      />
+
+      {/* Cabeza de la flor: capullo cerrado o flor abierta radiante */}
+      {open ? (
+        <g className="flower-petals" transform="translate(60 64)">
+          {[0, 60, 120, 180, 240, 300].map((angle) => (
+            <ellipse
+              key={angle}
+              className="flower-petal"
+              cx="0"
+              cy="-19"
+              rx="11"
+              ry="18"
+              fill={color}
+              stroke="#ffffff"
+              strokeWidth="3"
+              transform={`rotate(${angle})`}
+              style={{ transformOrigin: "0px 0px" }}
+            />
+          ))}
+          {/* Centro dorado de la flor abierta */}
+          <circle className="flower-core" r="9" fill="#d8e02a" stroke="#ffffff" strokeWidth="3" />
+          <circle r="4" fill="#ff9d4d" opacity="0.8" />
+        </g>
+      ) : (
+        <g className="flower-bud" transform="translate(60 64)">
+          {/* Pétalo asomando por la parte superior del capullo */}
+          <ellipse cx="0" cy="-14" rx="7" ry="12" fill={color} stroke="#ffffff" strokeWidth="2" />
+          {/* Sépalos verdes que abrazan el capullo */}
+          <path
+            className="flower-sepal"
+            d="M0 -22 C -14 -6 -12 14 0 18 C 12 14 14 -6 0 -22 Z"
+            fill="#7cc43a"
             stroke="#ffffff"
             strokeWidth="3"
-            transform={`rotate(${angle})`}
-            style={{ transformOrigin: "0px 0px" }}
           />
-        ))}
-        <circle className="flower-core" r={open ? 8 : 5} fill="#d8e02a" stroke="#ffffff" strokeWidth="3" />
-      </g>
-
-      {!open && (
-        <path
-          className="flower-sepal"
-          d="M60 22 C 44 40 46 62 60 74 C 74 62 76 40 60 22 Z"
-          fill="#7cc43a"
-          stroke="#ffffff"
-          strokeWidth="3"
-        />
+          {/* Línea divisoria suave del capullo */}
+          <path d="M0 -18 L0 16" stroke="#57a52a" strokeWidth="2" strokeLinecap="round" />
+        </g>
       )}
     </svg>
   );

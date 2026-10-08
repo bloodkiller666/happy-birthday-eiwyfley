@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, useGSAP, SplitText, EASE } from "@/lib/gsap";
+import { gsap, useGSAP, SplitText, ScrollTrigger, EASE } from "@/lib/gsap";
 import { birthday } from "@/config/birthday";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { prefersReducedMotion } from "@/lib/device";
@@ -23,6 +23,11 @@ const PARALLAX: Array<{ selector: string; distance: number; scale?: number }> = 
  * Capítulo 1 — El Vuelo.
  * 6 capas de parallax con scrub, la dragona cruza el cielo por una MotionPath
  * ligada al scroll y las frases épicas se revelan palabra por palabra.
+ *
+ * Bug A fix: frases ocultas en CSS (`.flight-line { opacity:0; visibility:hidden }`),
+ * mostradas una a la vez con scrub timeline + SplitText por words.
+ * Cada frase usa `white-space: normal`, `max-width`, y `text-wrap: balance`.
+ * Backdrop oscuro translúcido para legibilidad sobre las nubes claras.
  */
 export function Flight() {
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -53,7 +58,11 @@ export function Flight() {
           ease: "none",
           scrollTrigger: scrub(),
         });
-        gsap.to(".layer-stars", { opacity: 0.9, ease: "none", scrollTrigger: { ...scrub(), scrub: 1.4 } });
+        gsap.to(".layer-stars", {
+          opacity: 0.9,
+          ease: "none",
+          scrollTrigger: { ...scrub(), scrub: 1.4 },
+        });
 
         PARALLAX.forEach(({ selector, distance, scale }) => {
           gsap.to(selector, {
@@ -76,41 +85,99 @@ export function Flight() {
           scrollTrigger: { ...scrub(), scrub: 1.2 },
         });
       } else {
-        gsap.set(".flight-dragon", { xPercent: 0, yPercent: 0, left: "55%", top: "22%" });
+        gsap.set(".flight-dragon", {
+          xPercent: 0,
+          yPercent: 0,
+          left: "55%",
+          top: "22%",
+        });
         gsap.set(".layer-stars", { opacity: 0.5 });
       }
 
       // Frases: revelado palabra por palabra con SplitText.
+      // Esperamos a que las fuentes estén listas para que SplitText mida bien.
       const lines = gsap.utils.toArray<HTMLElement>(".flight-line");
       const splits: SplitText[] = [];
 
-      if (!soft && lines.length > 0) {
-        const timeline = gsap.timeline({
-          defaults: { ease: EASE.soft },
-          scrollTrigger: { ...scrub(), scrub: 1.1 },
-        });
+      const buildTextTimeline = () => {
+        // Cleanup previous splits if fonts reload
+        splits.forEach((s) => s.revert());
+        splits.length = 0;
 
-        lines.forEach((line, index) => {
-          const split = SplitText.create(line, {
-            type: "words",
-            wordsClass: "flight-word",
-            mask: "words",
+        if (!soft && lines.length > 0) {
+          // Set initial hidden state via GSAP (CSS already hides them)
+          gsap.set(lines, { autoAlpha: 0 });
+
+          const timeline = gsap.timeline({
+            defaults: { ease: EASE.soft },
+            scrollTrigger: { ...scrub(), scrub: 1.1 },
           });
-          splits.push(split);
-          const at = index * 1.6;
-          timeline
-            .fromTo(
-              split.words,
-              { yPercent: 130, autoAlpha: 0, rotate: 4 },
-              { yPercent: 0, autoAlpha: 1, rotate: 0, duration: 1, stagger: 0.09 },
-              at,
-            )
-            .to(
-              split.words,
-              { yPercent: -130, autoAlpha: 0, duration: 0.8, stagger: 0.05, ease: "power2.in" },
-              at + 1.25,
-            );
-        });
+
+          const phraseLen = 1.6;
+          const holdLen = 0.4;
+          const exitLen = 0.8;
+
+          lines.forEach((line, index) => {
+            const split = SplitText.create(line, {
+              type: "words",
+              wordsClass: "flight-word",
+              mask: "words",
+              autoSplit: true,
+              onSplit(self: { words?: Element[] }) {
+                // Re-set initial state after re-split using self instance
+                if (self?.words?.length) {
+                  gsap.set(self.words, {
+                    yPercent: 130,
+                    autoAlpha: 0,
+                    rotate: 4,
+                  });
+                }
+              },
+            });
+            splits.push(split);
+
+            const at = index * (phraseLen + holdLen + exitLen);
+
+            // Enter: show the phrase container then stagger words in
+            timeline
+              .set(line, { autoAlpha: 1 }, at)
+              .fromTo(
+                split.words,
+                { yPercent: 130, autoAlpha: 0, rotate: 4 },
+                {
+                  yPercent: 0,
+                  autoAlpha: 1,
+                  rotate: 0,
+                  duration: phraseLen,
+                  stagger: 0.09,
+                  immediateRender: false,
+                },
+                at,
+              )
+              // Exit: hide the phrase before the next one
+              .to(
+                split.words,
+                {
+                  yPercent: -130,
+                  autoAlpha: 0,
+                  duration: exitLen,
+                  stagger: 0.05,
+                  ease: "power2.in",
+                },
+                at + phraseLen + holdLen,
+              )
+              .set(line, { autoAlpha: 0 }, at + phraseLen + holdLen + exitLen);
+          });
+        }
+
+        ScrollTrigger.refresh();
+      };
+
+      // Wait for fonts then build
+      if (document.fonts?.ready) {
+        document.fonts.ready.then(buildTextTimeline);
+      } else {
+        buildTextTimeline();
       }
 
       // El título del capítulo se despide al empezar el vuelo.
@@ -143,7 +210,10 @@ export function Flight() {
       aria-label={`${birthday.flight.eyebrow}: ${birthday.flight.title}`}
       className="relative h-[520vh]"
     >
-      <div ref={stageRef} className="sticky top-0 h-dvh w-full overflow-hidden sky-gradient">
+      <div
+        ref={stageRef}
+        className="sticky top-0 h-dvh w-full overflow-hidden sky-gradient"
+      >
         {/* estrellas del atardecer */}
         <div className="layer-stars pointer-events-none absolute inset-0 opacity-0">
           {[
@@ -221,16 +291,22 @@ export function Flight() {
         {/* textos */}
         <div className="flight-heading pointer-events-none absolute inset-x-0 top-[16%] z-10 flex flex-col items-center gap-2 px-6 text-center">
           <p className="eyebrow text-ink/70">{birthday.flight.eyebrow}</p>
-          <h2 className="ink-outline text-4xl text-white sm:text-6xl">{birthday.flight.title}</h2>
+          <h2 className="ink-outline text-4xl text-white sm:text-6xl">
+            {birthday.flight.title}
+          </h2>
           <p className="font-display text-sm font-semibold text-ink/70">
             {birthday.flight.dawnLabel} → {birthday.flight.duskLabel}
           </p>
         </div>
 
+        {/* Fondo oscuro translúcido para legibilidad */}
+        <div className="flight-text-backdrop pointer-events-none absolute inset-0 z-[9]" />
+
         <div
           className={cn(
             "pointer-events-none absolute inset-0 z-10",
-            reducedMotion && "flex flex-col items-center justify-center gap-5 px-6 text-center",
+            reducedMotion &&
+              "flex flex-col items-center justify-center gap-5 px-6 text-center",
           )}
         >
           {birthday.flight.lines.map((line) => (
@@ -240,8 +316,20 @@ export function Flight() {
                 "flight-line ink-outline px-6 text-center font-display font-semibold text-white",
                 reducedMotion
                   ? "text-xl sm:text-3xl"
-                  : "absolute inset-x-0 top-1/2 -translate-y-1/2 text-2xl sm:text-4xl md:text-5xl",
+                  : "absolute inset-x-0 top-1/2 mx-auto -translate-y-1/2 text-2xl sm:text-4xl md:text-5xl",
               )}
+              style={
+                reducedMotion
+                  ? undefined
+                  : {
+                      maxWidth: "min(22ch, 80vw)",
+                      whiteSpace: "normal",
+                      textAlign: "center",
+                      textWrap: "balance",
+                      textShadow:
+                        "0 0 12px rgba(23, 32, 46, 0.7), 0 4px 8px rgba(23, 32, 46, 0.45), 0 0 8px rgba(255, 255, 255, 0.75), 0 3px 0 rgba(56, 68, 76, 0.18)",
+                    }
+              }
             >
               {line}
             </p>

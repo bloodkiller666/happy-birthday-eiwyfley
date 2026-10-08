@@ -9,6 +9,7 @@ import { ProgressBar } from "./ProgressBar";
 import { cn } from "@/lib/utils";
 
 const CHAPTER_LABEL: Record<ChapterId, { eyebrow: string; title: string }> = {
+  prologue: { eyebrow: birthday.prologue.eyebrow, title: birthday.prologue.title },
   flight: { eyebrow: birthday.flight.eyebrow, title: birthday.flight.title },
   map: { eyebrow: birthday.map.eyebrow, title: birthday.map.title },
   cave: { eyebrow: birthday.cave.eyebrow, title: birthday.cave.title },

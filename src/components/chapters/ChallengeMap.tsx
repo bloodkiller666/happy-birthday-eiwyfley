@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { gsap, useGSAP, ScrollTrigger } from "@/lib/gsap";
+import { useCallback, useRef, type CSSProperties } from "react";
+import { gsap, useGSAP } from "@/lib/gsap";
 import { birthday } from "@/config/birthday";
-import { useAdventureStore, selectGemCount, TOTAL_GEMS } from "@/store/useAdventureStore";
+import {
+  useAdventureStore,
+  selectGemCount,
+  TOTAL_GEMS,
+} from "@/store/useAdventureStore";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useViewportWidth } from "@/hooks/useViewportWidth";
 import { prefersReducedMotion } from "@/lib/device";
-import { scrollToTarget } from "@/lib/lenis";
 import { Cloud, MountainRange } from "@/components/art/scenery";
 import { cn } from "@/lib/utils";
 import { StationPanel } from "@/components/games/StationPanel";
@@ -15,137 +18,83 @@ import { StationPanel } from "@/components/games/StationPanel";
 /** Panel de introducción + una estación por gema. */
 const PANEL_COUNT = birthday.stations.length + 1;
 
-/** Progreso exacto de cada panel dentro del recorrido horizontal. */
-const SNAP_POINTS = Array.from({ length: PANEL_COUNT }, (_, index) => index / (PANEL_COUNT - 1));
-
 /**
  * Capítulo 2 — El Mapa de Desafíos.
  *
- * Sección alta con una escena "sticky": el scroll vertical mueve un mapa enorme
- * en horizontal, con camino SVG que se traza, snaps por estación y un
- * indicador de progreso.
+ * Bug B fix: eliminado el scrub horizontal. El track ahora se mueve por estado:
+ * `gsap.to(track, { x: -currentStation * width })` cuando cambia `currentStation`.
+ * Ni la rueda ni el toque mueven el mapa; solo avanza al completar un juego.
  *
- * DECISIÓN DE DISEÑO: usamos `position: sticky` en lugar de `pin: true` de
- * ScrollTrigger. El resultado visual es idéntico (la escena queda fija mientras
- * el scroll avanza) pero sin pin-spacers: la geometría es determinista, no hay
- * saltos de layout y se comporta igual en móvil. El scrub, los snaps y el
- * trazado del camino siguen siendo 100% ScrollTrigger.
+ * Bug B fix: los juegos se renderizan en un overlay portal a pantalla completa,
+ * fuera del track, manejado por StationPanel + GameOverlay.
+ *
+ * Estaciones secuenciales: solo la estación `currentStation` tiene botón "Jugar"
+ * activo; las demás se ven bloqueadas (candado, atenuadas).
  */
 export function ChallengeMap() {
   const sectionRef = useRef<HTMLElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<ScrollTrigger | null>(null);
-  const [activePanel, setActivePanel] = useState(0);
-  /** Hay un minijuego en curso: no se snapea ni se mueve el mapa. */
-  const lockingRef = useRef(false);
-  const gameRunning = useAdventureStore((state) => state.scrollLocks.length > 0);
+  const currentStation = useAdventureStore((state) => state.currentStation);
+  const advanceStation = useAdventureStore((state) => state.advanceStation);
   const gemCount = useAdventureStore(selectGemCount);
+  const gems = useAdventureStore((state) => state.gems);
   const reducedMotion = useReducedMotion();
   const panelWidth = useViewportWidth();
-  const distance = panelWidth * (PANEL_COUNT - 1);
 
-  // Mientras se juega, el mapa se queda quieto: ni snaps ni desplazamientos.
-  useEffect(() => {
-    lockingRef.current = gameRunning;
-  }, [gameRunning]);
+  // Animate track to current station position
+  useGSAP(
+    () => {
+      const track = trackRef.current;
+      if (!track || panelWidth <= 0) return;
 
-  /**
-   * Al empezar un reto: corta el snap en vuelo y alinea el mapa exactamente con
-   * la estación, para que nadie juegue con la tarjeta fuera de pantalla.
-   */
-  const alignToPanel = useCallback(
-    (index: number) => {
-      const trigger = triggerRef.current;
-      lockingRef.current = true;
-      // El snap de ScrollTrigger es un tween sobre el scroller: así se cancela.
-      gsap.killTweensOf(window);
-      if (!trigger) return;
-      const width = document.documentElement.clientWidth || window.innerWidth;
-      scrollToTarget(Number(trigger.start) + width * index, { immediate: true });
+      // The intro panel is panel 0, first station is panel 1.
+      // When currentStation=0, we want to show panel 1 (first station).
+      // But initially show the intro (panel 0).
+      const targetPanel = currentStation === 0 && gemCount === 0 ? 0 : currentStation + 1;
+      const targetX = -targetPanel * panelWidth;
+
+      gsap.to(track, {
+        x: targetX,
+        duration: prefersReducedMotion() ? 0.3 : 1.4,
+        ease: "power2.inOut",
+      });
     },
-    [],
+    { dependencies: [currentStation, panelWidth, gemCount], scope: sectionRef },
   );
 
-  const goToPanel = useCallback((index: number) => {
-    const trigger = triggerRef.current;
-    if (prefersReducedMotion() || !trigger) {
-      document
-        .querySelector<HTMLElement>(`[data-map-panel="${index}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
-      return;
-    }
-    const width = document.documentElement.clientWidth || window.innerWidth;
-    scrollToTarget(Number(trigger.start) + width * index + 4, { duration: 1.3 });
-  }, []);
-
+  // Trail drawing based on station progress
   useGSAP(
     () => {
       const section = sectionRef.current;
-      const track = trackRef.current;
-      if (!section || !track) return;
+      if (!section || panelWidth <= 0) return;
 
-      const soft = prefersReducedMotion();
-      // Sin ancho de viewport conocido todavía no hay geometría que animar.
-      if (soft || panelWidth <= 0) return;
-
-      const travel = () => panelWidth * (PANEL_COUNT - 1);
-      const triggerVars = () => ({
-        trigger: section,
-        start: "top top",
-        end: () => `+=${travel()}`,
-        scrub: 1,
-        invalidateOnRefresh: true,
+      const progress = gemCount / TOTAL_GEMS;
+      gsap.to(".map-trail", {
+        strokeDashoffset: 1 - progress,
+        duration: 0.8,
+        ease: "power2.out",
       });
-
-      const tween = gsap.to(track, {
-        x: () => -travel(),
-        ease: "none",
-        scrollTrigger: {
-          id: "challenge-map",
-          ...triggerVars(),
-          snap: {
-            // Un punto de anclaje por panel (portada + 4 estaciones).
-            // Con un reto en curso no se snapea: el mapa se queda donde está.
-            snapTo: (value: number, self?: ScrollTrigger) => {
-              // Con un reto en curso: devolvemos el progreso real (sin inercia),
-              // así el snap no mueve nada y el mapa queda congelado.
-              if (lockingRef.current) return self ? self.progress : value;
-              return ScrollTrigger.snapDirectional(SNAP_POINTS)(value, self?.direction ?? 1);
-            },
-            duration: { min: 0.25, max: 0.7 },
-            delay: 0.06,
-            ease: "power1.inOut",
-          },
-          onUpdate: (self) => {
-            const index = Math.round(self.progress * (PANEL_COUNT - 1));
-            setActivePanel((previous) => (previous === index ? previous : index));
-          },
-        },
-      });
-
-      triggerRef.current = tween.scrollTrigger ?? null;
-
-      // El camino se traza a medida que el mapa avanza.
-      gsap.fromTo(
-        ".map-trail",
-        { strokeDashoffset: 1 },
-        { strokeDashoffset: 0, ease: "none", scrollTrigger: triggerVars() },
-      );
-
-      // Las nubes del fondo se mueven más lento (profundidad).
-      gsap.to(".map-clouds", {
-        xPercent: -12,
-        ease: "none",
-        scrollTrigger: { ...triggerVars(), scrub: 1.4 },
-      });
-
-      return () => {
-        tween.scrollTrigger?.kill();
-        triggerRef.current = null;
-      };
     },
-    { dependencies: [reducedMotion, panelWidth], scope: sectionRef },
+    { dependencies: [gemCount, panelWidth], scope: sectionRef },
   );
+
+  const handleGameComplete = useCallback(() => {
+    advanceStation();
+  }, [advanceStation]);
+
+  const goToFirstStation = useCallback(() => {
+    const track = trackRef.current;
+    if (!track || panelWidth <= 0) return;
+    gsap.to(track, {
+      x: -panelWidth,
+      duration: prefersReducedMotion() ? 0.3 : 1.2,
+      ease: "power2.inOut",
+    });
+  }, [panelWidth]);
+
+  // Active panel index for the dots indicator
+  const activeDotIndex =
+    currentStation === 0 && gemCount === 0 ? 0 : currentStation + 1;
 
   return (
     <section
@@ -156,18 +105,14 @@ export function ChallengeMap() {
       style={
         {
           "--map-panel-width": panelWidth > 0 ? `${panelWidth}px` : "100vw",
-          height: reducedMotion ? "100dvh" : `calc(100dvh + ${distance}px)`,
         } as CSSProperties
       }
-      className="relative w-full"
+      className="relative h-dvh w-full"
     >
       <div
         className={cn(
-          "sticky top-0 h-dvh w-full overflow-hidden bg-gradient-to-b from-sky-top via-aqua to-eiwy/70",
-          // Con movimiento reducido el mapa se recorre deslizando la escena a mano.
-          reducedMotion && "overflow-x-auto overflow-y-hidden no-scrollbar",
+          "relative h-full w-full overflow-hidden bg-gradient-to-b from-sky-top via-aqua to-eiwy/70",
         )}
-        style={reducedMotion ? { scrollSnapType: "x mandatory" } : undefined}
       >
         {/* fondo del mapa */}
         <div className="pointer-events-none absolute inset-0">
@@ -181,12 +126,15 @@ export function ChallengeMap() {
           </div>
         </div>
 
-        {/* pista horizontal */}
+        {/* pista horizontal — moves by state, not by scroll */}
         <div
           ref={trackRef}
           data-map-track
           style={{ width: `calc(var(--map-panel-width) * ${PANEL_COUNT})` }}
-          className={cn("relative flex h-full", !reducedMotion && "will-change-transform")}
+          className={cn(
+            "relative flex h-full",
+            !reducedMotion && "will-change-transform",
+          )}
         >
           {/* camino dibujado con SVG */}
           <svg
@@ -228,7 +176,9 @@ export function ChallengeMap() {
               <h2 className="ink-outline text-3xl font-semibold text-deep sm:text-5xl">
                 {birthday.map.title}
               </h2>
-              <p className="max-w-lg text-base font-semibold text-ink/75">{birthday.map.intro}</p>
+              <p className="max-w-lg text-base font-semibold text-ink/75">
+                {birthday.map.intro}
+              </p>
               <div className="flex items-center gap-2">
                 {birthday.stations.map((station, index) => (
                   <span
@@ -250,12 +200,14 @@ export function ChallengeMap() {
               )}
               <button
                 type="button"
-                onClick={() => goToPanel(1)}
+                onClick={goToFirstStation}
                 className="sticker rounded-full bg-eiwy px-6 py-3 font-display font-semibold text-ink transition-transform duration-200 hover:-translate-y-1"
               >
                 {birthday.buttons.play}
               </button>
-              <p className="text-xs font-semibold text-ink/60">{birthday.map.hint}</p>
+              <p className="text-xs font-semibold text-ink/60">
+                Completá cada reto para avanzar
+              </p>
             </div>
           </div>
 
@@ -267,23 +219,24 @@ export function ChallengeMap() {
               index={index}
               total={birthday.stations.length}
               reducedMotion={reducedMotion}
-              onEnterChallenge={() => alignToPanel(index + 1)}
-              onNext={() => {
-                if (index + 1 < birthday.stations.length) goToPanel(index + 2);
-                else goToCave(triggerRef.current);
+              isActive={currentStation === index}
+              isCompleted={gems[station.id]}
+              onEnterChallenge={() => {
+                // Nothing needed — games now open in portal overlay
               }}
+              onGameComplete={handleGameComplete}
             />
           ))}
         </div>
 
-        {/* indicador de progreso del mapa */}
+        {/* indicador de progreso del mapa — solo indicadores, no clickeables */}
         <div className="pointer-events-none absolute inset-x-0 bottom-2 z-20 flex items-center justify-center gap-2">
           {Array.from({ length: PANEL_COUNT }, (_, index) => (
             <span
               key={index}
               className={cn(
                 "h-2 w-8 rounded-full border-2 border-white transition-colors duration-300",
-                index === activePanel ? "bg-ink/80" : "bg-white/50",
+                index === activeDotIndex ? "bg-ink/80" : "bg-white/50",
               )}
             />
           ))}
@@ -291,13 +244,4 @@ export function ChallengeMap() {
       </div>
     </section>
   );
-}
-
-/** Baja hasta el inicio del Capítulo 3 (cueva). */
-function goToCave(trigger: ScrollTrigger | null): void {
-  if (trigger) {
-    scrollToTarget(Number(trigger.end) + 12, { duration: 1.4 });
-    return;
-  }
-  document.getElementById("cave")?.scrollIntoView({ behavior: "smooth" });
 }

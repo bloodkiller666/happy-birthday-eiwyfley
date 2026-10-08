@@ -1,37 +1,37 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { gsap } from "@/lib/gsap";
 import { birthday } from "@/config/birthday";
 import { audio } from "@/lib/audio";
 import { burstAt } from "@/components/effects/ParticlesCanvas";
 import { DragonSilhouette } from "@/components/art/DragonAvatar";
 import { clamp } from "@/lib/utils";
-import { GameShell } from "./GameShell";
+import { GameModalShell } from "./GameModalShell";
 import type { GameProps } from "./types";
 
 const TARGET_EMBERS = 5;
 const MAX_HEARTS = 3;
-const ROUND_SECONDS = 20;
-const PLAYER_W = 72;
-const PLAYER_H = 58;
-/** Cada cuánto aparece una roca o brasa. */
-const SPAWN_INTERVAL = 0.7;
+const ROUND_SECONDS = 25;
+const PLAYER_W = 64;
+const PLAYER_H = 48;
+const SPAWN_INTERVAL = 0.65;
 
-interface Item {
-  el: HTMLDivElement;
+interface GameItem {
+  id: number;
   x: number;
   y: number;
   vy: number;
   size: number;
   kind: "rock" | "ember";
   dead: boolean;
+  rotation: number;
+  vRot: number;
 }
 
 /**
  * Volcán — "Aliento de Fuego".
- * Movés a la dragona con el mouse, el dedo o las flechas; esquivás rocas y
- * recogés brasas. Dificultad amable: 3 corazones y reintentos sin castigo.
+ * Mueve a la dragona con mouse, táctil o flechas del teclado.
+ * Esquiva rocas volcánicas y junta 5 brasas ardientes.
  */
 export function DodgeGame({
   accent,
@@ -42,61 +42,23 @@ export function DodgeGame({
   onComplete,
   onFail,
 }: GameProps) {
-  const areaRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<HTMLDivElement | null>(null);
-  const itemsRef = useRef<Item[]>([]);
-  const targetXRef = useRef(0);
-  const currentXRef = useRef(0);
+  const itemsRef = useRef<GameItem[]>([]);
+  const targetXRef = useRef<number | null>(null);
+  const currentXRef = useRef<number | null>(null);
   const keysRef = useRef({ left: false, right: false });
   const sizeRef = useRef({ width: 0, height: 0 });
   const finishedRef = useRef(false);
+  const nextItemIdRef = useRef(0);
 
   const [embers, setEmbers] = useState(0);
   const [hearts, setHearts] = useState(MAX_HEARTS);
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS);
   const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState(birthday.games.dodge.instruction);
+  const [status, setStatus] = useState("Mové a la dragona para juntar 5 brasas");
   const [outcome, setOutcome] = useState<"none" | "win" | "fail">("none");
-
-  const spawnItem = useCallback(() => {
-    const area = areaRef.current;
-    if (!area) return;
-    const { width } = sizeRef.current;
-    if (width <= 0) return;
-
-    const isEmber = Math.random() < 0.45;
-    const size = isEmber ? 26 : 34 + Math.random() * 18;
-    const el = document.createElement("div");
-    el.style.position = "absolute";
-    el.style.left = "0px";
-    el.style.top = "0px";
-    el.style.width = `${size}px`;
-    el.style.height = `${size}px`;
-    el.style.willChange = "transform";
-    el.style.pointerEvents = "none";
-    if (isEmber) {
-      el.style.borderRadius = "50%";
-      el.style.background = `radial-gradient(circle at 35% 35%, #fff6cf, ${accent})`;
-      el.style.boxShadow = `0 0 18px ${accent}`;
-      el.style.border = "2px solid #ffffff";
-    } else {
-      el.style.background = "#6b2a14";
-      el.style.boxShadow = "inset -6px -6px 0 rgba(0,0,0,0.25)";
-      el.style.border = "3px solid #ffffff";
-      el.style.borderRadius = size > 44 ? "45% 55% 40% 60%" : "50%";
-    }
-    area.appendChild(el);
-
-    itemsRef.current.push({
-      el,
-      x: 20 + Math.random() * Math.max(1, width - size - 40),
-      y: -size,
-      vy: (isEmber ? 210 : 250) + Math.random() * 140,
-      size,
-      kind: isEmber ? "ember" : "rock",
-      dead: false,
-    });
-  }, [accent]);
+  const [renderItems, setRenderItems] = useState<GameItem[]>([]);
 
   const finish = useCallback(
     (kind: "win" | "fail") => {
@@ -117,162 +79,226 @@ export function DodgeGame({
     [onComplete, onFail, reducedMotion],
   );
 
-  /** Bucle principal del juego. */
+  // ResizeObserver para garantizar dimensiones antes de empezar el loop
   useEffect(() => {
-    const area = areaRef.current;
-    if (!area || !running) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    const measure = () => {
-      const rect = area.getBoundingClientRect();
-      sizeRef.current = { width: rect.width, height: rect.height };
-      if (currentXRef.current === 0) {
-        currentXRef.current = rect.width / 2;
-        targetXRef.current = rect.width / 2;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          sizeRef.current = { width, height };
+          if (currentXRef.current === null) {
+            currentXRef.current = width / 2;
+            targetXRef.current = width / 2;
+          }
+          if (!running && outcome === "none" && !finishedRef.current) {
+            setRunning(true);
+          }
+        }
       }
-    };
-    measure();
-    window.addEventListener("resize", measure);
+    });
 
-    let frame = 0;
-    let last = performance.now();
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [outcome, running]);
+
+  // Loop principal del juego con físicas y colisiones
+  useEffect(() => {
+    if (!running) return;
+
+    let frameId = 0;
+    let lastTime = performance.now();
     let elapsed = 0;
     let spawnTimer = 0;
-    let heartsLeft = MAX_HEARTS;
-    let collected = 0;
+    let currentHearts = hearts;
+    let currentEmbers = embers;
 
     const tick = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.05);
-      last = now;
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
       elapsed += dt;
 
       const { width, height } = sizeRef.current;
-      const playerW = Math.min(PLAYER_W, width * 0.24);
-      const playerH = Math.min(PLAYER_H, height * 0.2);
-      const playerY = height - playerH - 6;
-
-      // movimiento del jugador
-      const step = (keysRef.current.right ? 1 : 0) - (keysRef.current.left ? 1 : 0);
-      if (step !== 0) targetXRef.current += step * 520 * dt;
-      targetXRef.current = clamp(targetXRef.current, playerW / 2, width - playerW / 2);
-      const smoothing = reducedMotion ? 1 : 0.22;
-      currentXRef.current += (targetXRef.current - currentXRef.current) * smoothing;
-
-      if (playerRef.current) {
-        playerRef.current.style.width = `${playerW}px`;
-        playerRef.current.style.transform = `translate3d(${currentXRef.current - playerW / 2}px, ${playerY}px, 0)`;
+      if (width <= 0 || height <= 0) {
+        frameId = requestAnimationFrame(tick);
+        return;
       }
 
-      // aparición de objetos
+      // Temporizador
+      const remainingTime = Math.max(0, ROUND_SECONDS - elapsed);
+      setTimeLeft(remainingTime);
+
+      // Movimiento con teclado
+      const moveSpeed = width * 1.1 * dt;
+      if (keysRef.current.left) {
+        targetXRef.current = Math.max(PLAYER_W / 2, (targetXRef.current ?? width / 2) - moveSpeed);
+      }
+      if (keysRef.current.right) {
+        targetXRef.current = Math.min(width - PLAYER_W / 2, (targetXRef.current ?? width / 2) + moveSpeed);
+      }
+
+      // Suavizado del movimiento de la dragona
+      if (targetXRef.current !== null) {
+        const current = currentXRef.current ?? targetXRef.current;
+        const diff = targetXRef.current - current;
+        currentXRef.current = current + diff * (reducedMotion ? 1 : Math.min(1, dt * 14));
+      }
+
+      // Actualizar posición DOM del jugador
+      const px = clamp(currentXRef.current ?? width / 2, PLAYER_W / 2, width - PLAYER_W / 2);
+      const py = height - PLAYER_H - 12;
+
+      if (playerRef.current) {
+        playerRef.current.style.transform = `translate3d(${px - PLAYER_W / 2}px, ${py}px, 0)`;
+      }
+
+      // Spawn de rocas y brasas
       spawnTimer += dt;
       if (spawnTimer >= SPAWN_INTERVAL) {
         spawnTimer = 0;
-        spawnItem();
+        const isEmber = Math.random() < 0.45;
+        const size = isEmber ? 26 : 34 + Math.random() * 14;
+        const item: GameItem = {
+          id: nextItemIdRef.current++,
+          x: 16 + Math.random() * Math.max(1, width - size - 32),
+          y: -size - 10,
+          vy: (isEmber ? 170 : 210) + Math.random() * 80,
+          size,
+          kind: isEmber ? "ember" : "rock",
+          dead: false,
+          rotation: Math.random() * 360,
+          vRot: (Math.random() - 0.5) * 120,
+        };
+        itemsRef.current.push(item);
       }
 
-      // física y colisiones
+      // Actualizar y comprobar colisiones
+      const playerBox = {
+        left: px - PLAYER_W * 0.4,
+        right: px + PLAYER_W * 0.4,
+        top: py + 4,
+        bottom: py + PLAYER_H - 4,
+      };
+
+      const updatedItems: GameItem[] = [];
+
       for (const item of itemsRef.current) {
         if (item.dead) continue;
+
         item.y += item.vy * dt;
-        item.el.style.transform = `translate3d(${item.x}px, ${item.y}px, 0)`;
+        item.rotation += item.vRot * dt;
 
-        const itemCenterX = item.x + item.size / 2;
-        const itemCenterY = item.y + item.size / 2;
-        const hitX = Math.abs(itemCenterX - currentXRef.current) < item.size / 2 + playerW * 0.34;
-        const hitY = Math.abs(itemCenterY - (playerY + playerH / 2)) < item.size / 2 + playerH * 0.34;
+        // Comprobar colisión con la dragona
+        const itemBox = {
+          left: item.x,
+          right: item.x + item.size,
+          top: item.y,
+          bottom: item.y + item.size,
+        };
 
-        if (hitX && hitY) {
+        const collided =
+          itemBox.right >= playerBox.left &&
+          itemBox.left <= playerBox.right &&
+          itemBox.bottom >= playerBox.top &&
+          itemBox.top <= playerBox.bottom;
+
+        if (collided) {
           item.dead = true;
-          item.el.remove();
-          const rect = area.getBoundingClientRect();
           if (item.kind === "ember") {
-            collected += 1;
-            setEmbers(collected);
+            currentEmbers += 1;
+            setEmbers(currentEmbers);
             audio.play("gem");
-            burstAt(
-              rect.left + itemCenterX,
-              rect.top + itemCenterY,
-              [accent, "#fff6cf"],
-              reducedMotion ? 6 : 12,
-            );
-            if (collected >= TARGET_EMBERS) {
+            setStatus(`¡Brasa recogida! (${currentEmbers}/${TARGET_EMBERS})`);
+
+            if (containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              burstAt(
+                rect.left + item.x + item.size / 2,
+                rect.top + item.y + item.size / 2,
+                ["#fff6cf", "#ff9d4d", accent],
+                reducedMotion ? 4 : 10,
+              );
+            }
+
+            if (currentEmbers >= TARGET_EMBERS) {
               finish("win");
               return;
             }
           } else {
-            heartsLeft -= 1;
-            setHearts(heartsLeft);
+            currentHearts -= 1;
+            setHearts(currentHearts);
             audio.play("pop");
-            burstAt(rect.left + itemCenterX, rect.top + itemCenterY, ["#6b2a14", "#ffffff"], 10);
-            gsap.fromTo(
-              area,
-              { x: -8 },
-              { x: 0, duration: 0.4, ease: "elastic.out(1, 0.4)" },
-            );
-            if (heartsLeft <= 0) {
+            setStatus(currentHearts > 0 ? `¡Cuidado con las rocas! ♥ ${currentHearts} restantes` : "¡Sin corazones!");
+
+            if (containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              burstAt(
+                rect.left + item.x + item.size / 2,
+                rect.top + item.y + item.size / 2,
+                ["#6b2a14", "#ff5a63"],
+                reducedMotion ? 4 : 10,
+              );
+            }
+
+            if (currentHearts <= 0) {
               finish("fail");
               return;
             }
           }
-        } else if (item.y > height + 40) {
-          item.dead = true;
-          item.el.remove();
+          continue;
         }
+
+        // Si sobrepasa la parte inferior, descartar
+        if (item.y > height + 20) {
+          item.dead = true;
+          continue;
+        }
+
+        updatedItems.push(item);
       }
 
-      itemsRef.current = itemsRef.current.filter((item) => !item.dead);
+      itemsRef.current = updatedItems;
+      setRenderItems([...updatedItems]);
 
-      const remaining = Math.max(0, ROUND_SECONDS - elapsed);
-      setTimeLeft((previous) => (Math.abs(previous - remaining) > 0.25 ? remaining : previous));
+      frameId = requestAnimationFrame(tick);
+    };
 
-      if (elapsed >= ROUND_SECONDS) {
-        finish(collected >= TARGET_EMBERS ? "win" : "fail");
-        return;
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [accent, finish, hearts, embers, reducedMotion, running]);
+
+  // Controladores de puntero para mover a la dragona
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0) {
+        targetXRef.current = clamp(e.clientX - rect.left, PLAYER_W / 2, rect.width - PLAYER_W / 2);
       }
-
-      frame = requestAnimationFrame(tick);
     };
 
-    frame = requestAnimationFrame(tick);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", measure);
-      itemsRef.current.forEach((item) => item.el.remove());
-      itemsRef.current = [];
-    };
-  }, [accent, finish, reducedMotion, running, spawnItem]);
-
-  /** Cuenta regresiva y arranque. */
-  useEffect(() => {
-    const timer = window.setTimeout(() => setRunning(true), 900);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  /** Puntero: la dragona sigue el mouse o el dedo. */
-  useEffect(() => {
-    const area = areaRef.current;
-    if (!area) return;
-
-    const onPointerMove = (event: PointerEvent) => {
-      const rect = area.getBoundingClientRect();
-      targetXRef.current = clamp(event.clientX - rect.left, 0, rect.width);
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      const touch = event.touches[0];
+    const onTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
       if (!touch) return;
-      const rect = area.getBoundingClientRect();
-      targetXRef.current = clamp(touch.clientX - rect.left, 0, rect.width);
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0) {
+        targetXRef.current = clamp(touch.clientX - rect.left, PLAYER_W / 2, rect.width - PLAYER_W / 2);
+      }
     };
 
-    area.addEventListener("pointermove", onPointerMove, { passive: true });
-    area.addEventListener("touchmove", onTouchMove, { passive: true });
+    container.addEventListener("pointermove", onPointerMove, { passive: true });
+    container.addEventListener("touchmove", onTouchMove, { passive: true });
+
     return () => {
-      area.removeEventListener("pointermove", onPointerMove);
-      area.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("pointermove", onPointerMove);
+      container.removeEventListener("touchmove", onTouchMove);
     };
   }, []);
 
-  /** Teclado: flechas izquierda/derecha. */
   const handleKey = (event: ReactKeyboardEvent<HTMLDivElement>, pressed: boolean) => {
     if (event.key === "ArrowLeft" || event.key === "a") {
       event.preventDefault();
@@ -289,80 +315,100 @@ export function DodgeGame({
     setHearts(MAX_HEARTS);
     setTimeLeft(ROUND_SECONDS);
     setOutcome("none");
-    setStatus(birthday.games.dodge.instruction);
-    itemsRef.current.forEach((item) => item.el.remove());
+    setStatus("Mové a la dragona para juntar 5 brasas");
     itemsRef.current = [];
+    setRenderItems([]);
     setRunning(true);
   };
 
   return (
-    <div className="h-full">
-      <GameShell
-        title={birthday.games.dodge.title}
-        instruction={birthday.games.dodge.instruction}
-        accent={accent}
-        status={status}
-        progressLabel={birthday.games.dodge.scoreLabel}
-        progressValue={embers}
-        progressMax={TARGET_EMBERS}
-        canSkip={canSkip}
-        onSkip={onSkip}
-        onClose={onClose}
+    <GameModalShell
+      title={birthday.games.dodge.title}
+      instruction={birthday.games.dodge.instruction}
+      accent={accent}
+      status={status}
+      progressLabel={birthday.games.dodge.scoreLabel}
+      progressValue={embers}
+      progressMax={TARGET_EMBERS}
+      canSkip={canSkip}
+      onSkip={onSkip}
+      onClose={onClose}
+    >
+      <div
+        ref={containerRef}
+        role="application"
+        aria-label={birthday.games.dodge.title}
+        tabIndex={0}
+        onKeyDown={(e) => handleKey(e, true)}
+        onKeyUp={(e) => handleKey(e, false)}
+        className="relative h-full w-full select-none touch-none overflow-hidden rounded-2xl border-4 border-white bg-gradient-to-b from-bark/90 via-ember/60 to-lime/30"
       >
-        <div
-          ref={areaRef}
-          role="application"
-          aria-label={birthday.games.dodge.title}
-          tabIndex={0}
-          onKeyDown={(event) => handleKey(event, true)}
-          onKeyUp={(event) => handleKey(event, false)}
-          className="relative h-full w-full cursor-crosshair touch-none overflow-hidden rounded-2xl border-4 border-white bg-gradient-to-b from-bark/90 via-ember/60 to-lime/30"
-        >
-          {/* cielo del volcán */}
-          <div className="pointer-events-none absolute inset-0 opacity-70 [background:radial-gradient(circle_at_50%_120%,rgba(255,157,77,0.75),transparent_60%)]" />
+        {/* Fondo resplandeciente */}
+        <div className="pointer-events-none absolute inset-0 opacity-70 [background:radial-gradient(circle_at_50%_120%,rgba(255,157,77,0.75),transparent_60%)]" />
 
-          <div ref={playerRef} className="pointer-events-none absolute left-0 top-0 w-[72px] will-change-transform">
-            <DragonSilhouette className="w-full drop-shadow-[0_6px_10px_rgba(0,0,0,0.35)]" />
-          </div>
-
-          <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2">
-            <span className="sticker rounded-full bg-cream/90 px-3 py-1 font-display text-xs font-semibold">
-              {birthday.games.dodge.timeLabel}: {Math.ceil(timeLeft)}s
-            </span>
-            <span className="sticker rounded-full bg-cream/90 px-3 py-1 font-display text-xs font-semibold">
-              {"♥".repeat(Math.max(0, hearts))}
-              <span className="opacity-30">{"♥".repeat(Math.max(0, MAX_HEARTS - hearts))}</span>
-            </span>
-          </div>
-
-          {!running && outcome === "none" && (
-            <div className="absolute inset-0 grid place-items-center bg-ink/25">
-              <p className="sticker rounded-full bg-cream/95 px-5 py-2 font-display font-semibold">
-                ¡Preparada… ya!
-              </p>
-            </div>
-          )}
-
-          {outcome !== "none" && (
-            <div className="absolute inset-0 grid place-items-center gap-3 bg-ink/35 p-4 text-center">
-              <div className="flex flex-col items-center gap-3">
-                <p className="sticker rounded-2xl bg-cream/95 px-5 py-3 font-display font-semibold text-ink">
-                  {outcome === "win" ? birthday.games.dodge.completeLabel : birthday.games.dodge.failLabel}
-                </p>
-                {outcome === "fail" && (
-                  <button
-                    type="button"
-                    onClick={restart}
-                    className="sticker rounded-full bg-eiwy px-5 py-2 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5"
-                  >
-                    {birthday.buttons.retry}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+        {/* Indicadores en esquina: vidas y tiempo */}
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2">
+          <span className="sticker rounded-full bg-cream/90 px-2.5 py-0.5 font-display text-xs font-semibold shadow-sm">
+            {"♥".repeat(Math.max(0, hearts))}
+            <span className="opacity-25">{"♥".repeat(Math.max(0, MAX_HEARTS - hearts))}</span>
+          </span>
+          <span className="sticker rounded-full bg-cream/90 px-2.5 py-0.5 font-display text-xs font-semibold shadow-sm">
+            ⏳ {Math.ceil(timeLeft)}s
+          </span>
         </div>
-      </GameShell>
-    </div>
+
+        {/* Elementos que caen (rocas y brasas) */}
+        {renderItems.map((item) => (
+          <div
+            key={item.id}
+            className="pointer-events-none absolute will-change-transform"
+            style={{
+              width: `${item.size}px`,
+              height: `${item.size}px`,
+              transform: `translate3d(${item.x}px, ${item.y}px, 0) rotate(${item.rotation}deg)`,
+              borderRadius: item.kind === "ember" ? "50%" : item.size > 42 ? "45% 55% 40% 60%" : "50%",
+              background:
+                item.kind === "ember"
+                  ? `radial-gradient(circle at 35% 35%, #ffffff, #fff6cf 40%, ${accent} 85%)`
+                  : "#5a2210",
+              boxShadow:
+                item.kind === "ember"
+                  ? `0 0 16px ${accent}, 0 0 6px #fff`
+                  : "inset -4px -4px 0 rgba(0,0,0,0.35)",
+              border: item.kind === "ember" ? "2px solid #ffffff" : "2.5px solid #ffffff",
+            }}
+          />
+        ))}
+
+        {/* Dragona del jugador */}
+        <div
+          ref={playerRef}
+          className="pointer-events-none absolute left-0 top-0 will-change-transform"
+          style={{ width: `${PLAYER_W}px`, height: `${PLAYER_H}px` }}
+        >
+          <DragonSilhouette className="w-full h-full drop-shadow-[0_6px_10px_rgba(0,0,0,0.4)]" />
+        </div>
+
+        {/* Overlay de fin de partida o reintento */}
+        {outcome !== "none" && (
+          <div className="absolute inset-0 z-20 grid place-items-center gap-3 bg-ink/40 p-4 text-center backdrop-blur-[2px]">
+            <div className="flex flex-col items-center gap-3">
+              <p className="sticker rounded-2xl bg-cream/95 px-5 py-3 font-display font-semibold text-ink shadow-lg">
+                {outcome === "win" ? birthday.games.dodge.completeLabel : birthday.games.dodge.failLabel}
+              </p>
+              {outcome === "fail" && (
+                <button
+                  type="button"
+                  onClick={restart}
+                  className="sticker rounded-full bg-eiwy px-6 py-2.5 font-display text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0 cursor-pointer shadow-md"
+                >
+                  {birthday.buttons.retry}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </GameModalShell>
   );
 }
