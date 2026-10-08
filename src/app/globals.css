@@ -1,26 +1,224 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   LA TRAVESÍA DE EIWY FLEY — Tokens de identidad visual
+   Todo el tema vive aquí. Si querés re-pintar la web, tocá sólo estas variables.
+   ========================================================================== */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* --- Identidad principal (definidas en el brief) --- */
+  --eiwy_color: #71cfce; /* principal */
+  --eiwy_secondary_color: rgba(113, 207, 205, 0.7); /* secundario */
+
+  /* --- Paleta de apoyo (extraída del avatar, ajustable) --- */
+  --eiwy-ink: #38444c; /* gris pizarra oscuro (cuernos, cola) */
+  --eiwy-lime: #d8e02a; /* amarillo lima (cuernos y gemas) */
+  --eiwy-leaf: #7cc43a; /* verde (ojos, pasto) */
+  --eiwy-cyan: #27c9ee; /* cian vivo */
+  --eiwy-deep: #2a9fae; /* turquesa profundo */
+  --eiwy-aqua: #8ee8e8; /* aqua claro */
+  --eiwy-ember: #ff9d4d; /* naranja (llamas) */
+  --eiwy-coral: #f05a63; /* coral */
+  --eiwy-bark: #6b2a14; /* marrón */
+  --eiwy-cream: #fdf0e8; /* crema / blanco cálido */
+
+  /* --- Derivados de escena (cielos, cueva, noche) --- */
+  --eiwy-sky-top: #7fd0e8;
+  --eiwy-sky-bottom: #dcf7f4;
+  --eiwy-dusk-top: #6d5aa6;
+  --eiwy-dusk-bottom: #ff9f6b;
+  --eiwy-night-top: #1d2740;
+  --eiwy-night-bottom: #35566f;
+  --eiwy-cave-top: #17202e;
+  --eiwy-cave-bottom: #2d4b52;
+  --eiwy-flame-core: #fff6cf;
+
+  /* --- Sombras y bordes tipo sticker --- */
+  --eiwy-shadow: rgba(56, 68, 76, 0.18);
+  --eiwy-shadow-strong: rgba(56, 68, 76, 0.32);
+  --eiwy-sticker-width: 3px;
+
+  --eiwy-paper: #fdf0e8;
 }
 
+/* Tailwind v4: exponer los tokens como utilidades (bg-eiwy, text-ink, ...) */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-eiwy: var(--eiwy_color);
+  --color-eiwy-soft: var(--eiwy_secondary_color);
+  --color-ink: var(--eiwy-ink);
+  --color-lime: var(--eiwy-lime);
+  --color-leaf: var(--eiwy-leaf);
+  --color-cyan: var(--eiwy-cyan);
+  --color-deep: var(--eiwy-deep);
+  --color-aqua: var(--eiwy-aqua);
+  --color-ember: var(--eiwy-ember);
+  --color-coral: var(--eiwy-coral);
+  --color-bark: var(--eiwy-bark);
+  --color-cream: var(--eiwy-cream);
+  --color-sky-top: var(--eiwy-sky-top);
+  --color-sky-bottom: var(--eiwy-sky-bottom);
+  --color-dusk-top: var(--eiwy-dusk-top);
+  --color-dusk-bottom: var(--eiwy-dusk-bottom);
+  --color-night-top: var(--eiwy-night-top);
+  --color-night-bottom: var(--eiwy-night-bottom);
+  --color-cave-top: var(--eiwy-cave-top);
+  --color-cave-bottom: var(--eiwy-cave-bottom);
+
+  --font-display: var(--font-fredoka), "Trebuchet MS", system-ui, sans-serif;
+  --font-body: var(--font-nunito), "Segoe UI", system-ui, sans-serif;
+
+  --shadow-sticker: 0 6px 0 var(--eiwy-shadow);
+  --shadow-sticker-lg: 0 12px 0 var(--eiwy-shadow);
+  --shadow-glow-eiwy: 0 0 40px rgba(113, 207, 205, 0.55);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ==========================================================================
+   Base
+   ========================================================================== */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: auto;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--eiwy-sky-bottom);
+  color: var(--eiwy-ink);
+  font-family: var(--font-body);
+  overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+::selection {
+  background: var(--eiwy_color);
+  color: #10424a;
+}
+
+:focus-visible {
+  outline: 3px solid var(--eiwy-cyan);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Lenis: clases recomendadas por la librería */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
+/* Bloqueo de scroll cuando no hay Lenis (prefers-reduced-motion usa scroll nativo). */
+html.scroll-locked {
+  overflow: hidden !important;
+}
+
+/* ==========================================================================
+   Utilidades propias
+   ========================================================================== */
+
+/* Borde blanco grueso + sombra de calcomanía (estilo de su ficha) */
+@utility sticker {
+  border-width: var(--eiwy-sticker-width);
+  border-style: solid;
+  border-color: #ffffff;
+  box-shadow: 0 6px 0 var(--eiwy-shadow);
+}
+
+@utility sticker-lg {
+  border-width: 5px;
+  border-style: solid;
+  border-color: #ffffff;
+  box-shadow: 0 12px 0 var(--eiwy-shadow);
+}
+
+/* Halo claro para que el texto se lea sobre cualquier fondo */
+@utility ink-outline {
+  text-shadow:
+    0 0 8px rgba(255, 255, 255, 0.75),
+    0 3px 0 rgba(56, 68, 76, 0.18);
+}
+
+@utility ink-outline-dark {
+  text-shadow:
+    0 0 10px rgba(23, 32, 46, 0.85),
+    0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Fondo de cielo con gradiente controlado por variables de escena */
+@utility sky-gradient {
+  background-image: linear-gradient(
+    to bottom,
+    var(--sky-top, var(--eiwy-sky-top)),
+    var(--sky-bottom, var(--eiwy-sky-bottom))
+  );
+}
+
+.eyebrow {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+/* Partículas / adornos que no deben capturar el puntero */
+.pointer-none {
+  pointer-events: none;
+}
+
+/* Texto con relleno degradado (fuego turquesa → naranja) */
+.flame-text {
+  background-image: linear-gradient(100deg, var(--eiwy-cyan), var(--eiwy-aqua) 35%, var(--eiwy-ember) 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Ocultar el cursor nativo cuando el cursor personalizado está activo */
+.custom-cursor-active,
+.custom-cursor-active * {
+  cursor: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
